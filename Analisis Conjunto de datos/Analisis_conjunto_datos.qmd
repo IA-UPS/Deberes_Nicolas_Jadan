@@ -1,0 +1,170 @@
+---
+title: "Análisis conjunto de datos"
+format: pdf
+editor: visual
+author: Nicolas Jadan
+---
+
+## Analisis conjunto de datos
+
+```{r warning=FALSE}
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+library(glmnet) 
+library(caret) 
+library(e1071) 
+library(ggstatsplot)
+library(corrplot)
+library(lavaan)
+```
+
+Leer los datos y renombrar las variables.
+
+```{r}
+Datos <- read.csv("./processed.switzerland.data",header=FALSE,sep=",",
+                  na.strings = '?')
+names(Datos) <- c( "Edad", "Sexo", "DPecho", "PresArtRep", "Colesterol","AzuA", 
+                   "ECGRep","FCardiaca","Angina", "ST","PenST", "Vasos", 
+                   "Estado", "Enfermedad")
+```
+
+Exploracion de los datos. Con la funcion `head` se muestran las primeras seis filas del conjunto de datos.
+
+```{r}
+head(Datos)
+```
+
+Definimos los datos por sus categorias.
+
+```{r}
+Datos$Sexo[Datos$Sexo==1] <- "Masculino"
+Datos$Sexo[Datos$Sexo==0] <- "Femenino"
+Datos$DPecho[Datos$DPecho==1] <- "Tipo 1"
+Datos$DPecho[Datos$DPecho==2] <- "Tipo 2"
+Datos$DPecho[Datos$DPecho==3] <- "Tipo 3"
+Datos$DPecho[Datos$DPecho==4] <- "Tipo 4"
+Datos$AzuA[Datos$AzuA==1] <- "Verdadero"
+Datos$AzuA[Datos$AzuA==0] <- "Falso"
+Datos$ECGRep[Datos$ECGRep==0] <- "Nivel 0"
+Datos$ECGRep[Datos$ECGRep==1] <- "Nivel 1"
+Datos$ECGRep[Datos$ECGRep==2] <- "Nivel 2"
+Datos$Angina[Datos$Angina==1] <- "Si"
+Datos$Angina[Datos$Angina==0] <- "No"
+Datos$PenST[Datos$PenST==1] <- "Valor 1"
+Datos$PenST[Datos$PenST==2] <- "Valor 2"
+Datos$PenST[Datos$PenST==3] <- "Valor 3"
+Datos$Estado[Datos$Estado==3] <- "N"
+Datos$Estado[Datos$Estado==6] <- "DF"
+Datos$Estado[Datos$Estado==7] <- "DR"
+```
+
+Agregamos una columna, modificando las etapas de "Enfermedad":
+
+-   Saludable (0 - No)
+
+-   Enfermo (1,2,3,4 - Si).
+
+```{r}
+c <- Datos$Enfermedad
+Corazon <- data.frame("Corazon"=c(c))
+Corazon$Corazon[Corazon$Corazon==0] <- "No"
+Corazon$Corazon[Corazon$Corazon==1] <- "Si"
+Corazon$Corazon[Corazon$Corazon==2] <- "Si"
+Corazon$Corazon[Corazon$Corazon==3] <- "Si"
+Corazon$Corazon[Corazon$Corazon==4] <- "Si"
+
+Datos <- cbind(Datos, Corazon)
+
+# Permite visualizar los datos de la tabla de mejor manera
+pander::pandoc.table(
+head(Datos)) 
+```
+
+### Analisis PCA
+
+Tecnica útil para resumir y explorar datos complejos, reducir la dimensionalidad y encontrar las variables y combinaciones lineales más relevantes en un conjunto de datos.
+
+```{r}
+PCA <- prcomp(Datos[,c("Edad", "PresArtRep","Colesterol", "FCardiaca", "ST")])
+
+PCA
+
+summary(PCA)
+
+biplot(PCA)
+```
+
+### Analisis Univariante
+
+Se obtienen las medidas de tendencia central, valores minimos y maximos y los quartiles de las variables especificadas. Se visualizan las variables de manera independiente, utilizando variables categoricas y variables cuantitativas.
+
+```{r}
+V.Cuantitativas <- data.frame("Edad" = Datos$Edad,"PresArtRep" = Datos$PresArtRep,
+                              "Colesterol" = Datos$Colesterol,
+                              "FCardiaca" = Datos$FCardiaca,"ST" = Datos$ST)
+summary(V.Cuantitativas)
+```
+
+Se calcula la desviacion estandar de las variables especificadas.
+
+```{r}
+z <- data.frame("Variables"= c("Edad","PresArtRep","Colesterol","FCardiaca","ST"),"Desv Est"= c(sqrt(var(Datos$Edad)),sqrt(var(Datos$PresArtRep)),sqrt(var(Datos$Colesterol)),sqrt(var(Datos$FCardiaca)),sqrt(var(Datos$ST))))
+knitr::kable(z)
+```
+
+Se realiza un histograma para una de las variables cuantitativas.
+
+```{r}
+ggplot(V.Cuantitativas, aes(Edad)) + 
+  geom_histogram(aes(fill=after_stat(count)), bins=10) +
+  geom_vline(aes(xintercept=mean(Edad)), color="black") +
+  geom_vline(aes(xintercept=median(Edad)), color= "green") +
+  labs(title = "Histograma de Edad",
+       x = "Edades",
+       y = "Frecuencia") +
+  scale_fill_continuous(name="Frecuencia") +
+  theme_classic()
+```
+
+-   El promedio de edad entre pacientes resulto de 54 años, con una mediana de 56 años (cercana al valor de la media, pero mayor), la línea roja refleja el valor de la media y la amarilla el valor de la mediana, también se puede observar que los datos tienen más concentración en las edades entre 50 a 60 años.
+
+    ```{r}
+    boxplot(V.Cuantitativas$PresArtRep, xlab = "Presion Arterial en Reposo (mmHg) ",col = "lightblue",bg = 'transparent',horizontal = T)
+    ```
+
+-   El 25% de los pacientes presentaron una frecuencia menor o igual a 133.5, el 50% de ellos una frecuencia menor o igual a 153, y el 75% una frecuencia menor o igual a 166. Los datos tienen un comportamiento asimétrico positivo, y hay existencia de valores atípicos.
+
+### Analisis Bivariante
+
+Se realiza una correlacion de las variables almacenadas en "V.Cuantitativas"
+
+```{r}
+Cor <- cor(V.Cuantitativas)
+corrplot(Cor, method="pie")
+```
+
+-   En la grafica se oberva esta correlacion, variando entre los colores rojo y azul, diferenciando de esta manera cuando la correlacion entre variables se hace cada vez más fuerte. En este caso las variables son muy débiles, ninguna supera el 0.5 para concluir que existe al menos una correlacion moderada o fuerte entre las variables.
+
+Se realiza una matriz de varianzas y covarianzas.
+
+```{r}
+Covarianza <- cov(V.Cuantitativas)
+knitr::kable(Covarianza)
+```
+
+Se realiza la comprobacion de que las variables sean independientes.
+
+```{r warning=FALSE}
+chi <- chisq.test(table(Datos$FCardiaca,
+                        Datos$Colesterol))
+
+```
+
+Se realiza la matriz de diagramas de dispersion.
+
+```{r}
+pairs(V.Cuantitativas[,1:5], pch = 19,  cex = 0.5,
+      col = "lightblue",
+            lower.panel=NULL)
+```
